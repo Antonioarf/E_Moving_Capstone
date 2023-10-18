@@ -7,10 +7,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -33,6 +35,8 @@ void printer(char msg){
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart1;
 
 /* Definitions for BT_reader */
@@ -56,10 +60,15 @@ const osThreadAttr_t Sensor_Read_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for BT_queue */
-osMessageQueueId_t BT_queueHandle;
-const osMessageQueueAttr_t BT_queue_attributes = {
-  .name = "BT_queue"
+/* Definitions for Input_queue */
+osMessageQueueId_t Input_queueHandle;
+const osMessageQueueAttr_t Input_queue_attributes = {
+  .name = "Input_queue"
+};
+/* Definitions for BT_send */
+osMessageQueueId_t BT_sendHandle;
+const osMessageQueueAttr_t BT_send_attributes = {
+  .name = "BT_send"
 };
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
@@ -68,6 +77,7 @@ const osMessageQueueAttr_t BT_queue_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM2_Init(void);
 void BT_reader_funct(void *argument);
 void MT_controller_funct(void *argument);
 void Sensor_reader_funct(void *argument);
@@ -105,6 +115,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /* USER CODE END 2 */
 
@@ -121,8 +132,11 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of BT_queue */
-  BT_queueHandle = osMessageQueueNew (16, sizeof(command), &BT_queue_attributes);
+  /* creation of Input_queue */
+  Input_queueHandle = osMessageQueueNew (16, sizeof(command), &Input_queue_attributes);
+
+  /* creation of BT_send */
+  BT_sendHandle = osMessageQueueNew (16, sizeof(char*), &BT_send_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* USER CODE END RTOS_QUEUES */
@@ -199,6 +213,54 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_IC_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
+  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
+  sConfigIC.ICFilter = 0;
+  if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -241,8 +303,9 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -290,6 +353,7 @@ void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
 	unsigned char str[14] ="\r\nIniciando \r\n";
+	char* res;
     char receivedData[32];
 	command com;
 
@@ -299,15 +363,24 @@ void BT_reader_funct(void *argument)
 //		sprintf(str, "\r\nTemp: %i\r\n",cont);
 		//		HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 //		cont++;
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! COLOCAR SEMAFORO e interrupção
+    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! add interuption to call  the task
 	while (1) {
 	        if (FON_UART_Receive(receivedData,500)){
 	        	// Replace huart1 with your UART handle
 	        	if (strlen(receivedData)==3){
 	        		com.button_id 		= receivedData[0] - '0';
 					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0');
-					osMessageQueuePut(BT_queueHandle, &com, 0, 2000);
+					osMessageQueuePut(Input_queueHandle, &com, 0, 2000);
 	        	}
+	        }
+	        while (1){
+	        	if (osMessageQueueGet(BT_sendHandle, &res, NULL, 250) == osOK) {
+	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
+	        	}
+	        	if (osMessageQueueGetCount(BT_sendHandle)==0){
+	        		break;
+	        	}
+
 	        }
 	        //osDelay(1000);
 	        osThreadYield();
@@ -333,23 +406,23 @@ void MT_controller_funct(void *argument)
 //le da memoria de longa duracao
 	int auth = 0;
 	command com;
+	//int speed=0; // max = 255
 
 	while(1){
-		if (osMessageQueueGet(BT_queueHandle, &com, NULL, 2000)== osOK){
+		if (osMessageQueueGet(Input_queueHandle, &com, NULL, 2000)== osOK){
 			if(com.button_id==9){
 				auth = com.button_status;
 				if (auth){
-					unsigned char str[15];
-				    sprintf(str, "\r\n ABRIU %i \r\n", auth);
-					HAL_UART_Transmit(&huart1, str, sizeof(str), 1000);
+					char* str = "ABRIU\n";
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 				}
 				else{
-					unsigned char str[15];
-				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
-					HAL_UART_Transmit(&huart1, str, sizeof(str), 1000);
+					char* str = "FECHOU\n";
+//				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 					}
 				}
-			//else if !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!TRATAR TODOS OS OUTROS COMs
+			//else if !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Deal with other commands
 
 		}
 		if(auth){}
@@ -373,7 +446,7 @@ void Sensor_reader_funct(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(100);
   }
   /* USER CODE END Sensor_reader_funct */
 }
