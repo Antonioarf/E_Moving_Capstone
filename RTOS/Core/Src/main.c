@@ -35,8 +35,6 @@ void printer(char msg){
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-TIM_HandleTypeDef htim2;
-
 UART_HandleTypeDef huart1;
 
 /* Definitions for BT_reader */
@@ -77,7 +75,6 @@ const osMessageQueueAttr_t BT_send_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
-static void MX_TIM2_Init(void);
 void BT_reader_funct(void *argument);
 void MT_controller_funct(void *argument);
 void Sensor_reader_funct(void *argument);
@@ -115,7 +112,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
-  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /* USER CODE END 2 */
 
@@ -213,54 +209,6 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_IC_InitTypeDef sConfigIC = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 4294967295;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_IC_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
-  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-  sConfigIC.ICFilter = 0;
-  if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-
-}
-
-/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -299,14 +247,24 @@ static void MX_USART1_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin : BREAK_Pin */
+  GPIO_InitStruct.Pin = BREAK_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BREAK_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 15, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
@@ -344,6 +302,29 @@ int FON_UART_Receive(char *received, uint16_t timeout) {
     }
 }
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+	if (GPIO_Pin == BREAK_Pin) { // Replace GPIO_PIN_X with your specific GPIO pin
+		if (HAL_GPIO_ReadPin(BREAK_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
+			// Interrupt triggered by a rising edge -> soltou
+			// Your code for rising edge handling here
+			// PULL UP -> QUANDO APERTA CAI
+			command com;
+    		com.button_id 		= 1;
+			com.button_status  	= 00;
+			osMessageQueuePut(Input_queueHandle, &com, 0, 500);
+
+
+		} else {
+			// Interrupt triggered by a falling edge -> andou
+			// Your code for falling edge handling here
+			command com;
+    		com.button_id 		= 1;
+			com.button_status  	= 01;
+			osMessageQueuePut(Input_queueHandle, &com, 0, 500);
+
+		}
+	}
+}
 
 /* USER CODE END 4 */
 
@@ -418,6 +399,18 @@ void MT_controller_funct(void *argument)
 				}
 				else{
 					char* str = "FECHOU\n";
+//				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
+					}
+				}
+			else if(com.button_id==1){
+				auth = com.button_status;
+				if (auth){
+					char* str = "SOLTOU\n";
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
+				}
+				else{
+					char* str = "FREIOU\n";
 //				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
 				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 					}
