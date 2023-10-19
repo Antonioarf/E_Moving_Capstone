@@ -8,6 +8,7 @@
     },
     "sensors":{
         "break":{
+            "pin":  "PA5",
             "id":1,
             "break":"00",
             "release":"01"
