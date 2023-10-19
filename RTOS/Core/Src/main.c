@@ -31,6 +31,27 @@ void printer(char msg){
 
 }
 
+char* osStatusToString(osStatus_t status) {
+    switch (status) {
+        case osOK:
+            return "OK: Operation completed successfully\r\n";
+        case osError:
+            return "osError: Unspecified error\r\n";
+        case osErrorTimeout:
+            return "Timeout: osErrorTimeout:  Operation timed out\r\n";
+        case osErrorResource:
+            return "Resource: osErrorResource: Resource not available\r\n";
+        case osErrorParameter:
+            return "Parameter: osErrorParameter: Parameter error\r\n";
+        case osErrorNoMemory:
+            return "NoMemory: osErrorNoMemory: System is out of memory\r\n";
+        default:
+            return "Unknown osStatus_t\r\n";
+    }
+}
+//osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+//char* str = osStatusToString(status);
+//HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
 /* USER CODE END PM */
 
@@ -263,7 +284,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(BREAK_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 15, 0);
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -276,52 +297,47 @@ int FON_UART_Receive(char *received, uint16_t timeout) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
-//	unsigned char str[7] ="CHAMOU ";
-//    HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
     while (1) {
         status = HAL_UART_Receive(&huart1, &receivedChar, 1, timeout);
 
         if (status == HAL_OK) {
             if (receivedChar == '\n') {
-                // Received a newline character, terminate the string and return 1
-            	//received[index] = '\n';
             	received[index] = '\0';
 
                 return 1;
             } else {
-                // Store the received character in the buffer
                 received[index] = receivedChar;
                 index++;
             }
         } else {
-            // Handle error or timeout
-            received[0] = '\0'; // Null-terminate the string to indicate no data received
+            received[0] = '\0';
             return 0;
         }
     }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-	if (GPIO_Pin == BREAK_Pin) { // Replace GPIO_PIN_X with your specific GPIO pin
+	command com;
+
+	if (GPIO_Pin == BREAK_Pin) {
+		com.button_id 		= 1;
 		if (HAL_GPIO_ReadPin(BREAK_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
-			// Interrupt triggered by a rising edge -> soltou
-			// Your code for rising edge handling here
-			// PULL UP -> QUANDO APERTA CAI
-			command com;
-    		com.button_id 		= 1;
-			com.button_status  	= 00;
-			osMessageQueuePut(Input_queueHandle, &com, 0, 500);
-
-
+			// Your code for rising edge -> apertou
+			com.button_status  	= 0;
+			osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+				if (status != osOK){
+				char* str = osStatusToString(status);
+				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+			}
 		} else {
-			// Interrupt triggered by a falling edge -> andou
-			// Your code for falling edge handling here
-			command com;
-    		com.button_id 		= 1;
-			com.button_status  	= 01;
-			osMessageQueuePut(Input_queueHandle, &com, 0, 500);
-
+			// Your code for falling edge -> soltou
+			com.button_status  	= 1;
+			osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+			if (status != osOK){
+				char* str = osStatusToString(status);
+				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+			}
 		}
 	}
 }
@@ -334,26 +350,23 @@ void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
 	unsigned char str[14] ="\r\nIniciando \r\n";
+	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
+
 	char* res;
     char receivedData[32];
 	command com;
 
-    HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
-	//printer('2');
-//		sprintf(str, "\r\nTemp: %i\r\n",cont);
-		//		HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
-//		cont++;
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! add interuption to call  the task
 	while (1) {
 	        if (FON_UART_Receive(receivedData,500)){
-	        	// Replace huart1 with your UART handle
 	        	if (strlen(receivedData)==3){
 	        		com.button_id 		= receivedData[0] - '0';
 					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0');
 					osMessageQueuePut(Input_queueHandle, &com, 0, 2000);
 	        	}
 	        }
+
+
 	        while (1){
 	        	if (osMessageQueueGet(BT_sendHandle, &res, NULL, 250) == osOK) {
 	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
@@ -363,6 +376,7 @@ void BT_reader_funct(void *argument)
 	        	}
 
 	        }
+
 	        //osDelay(1000);
 	        osThreadYield();
 	}
@@ -384,7 +398,6 @@ void MT_controller_funct(void *argument)
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
 
-//le da memoria de longa duracao
 	int auth = 0;
 	command com;
 	//int speed=0; // max = 255
@@ -399,7 +412,6 @@ void MT_controller_funct(void *argument)
 				}
 				else{
 					char* str = "FECHOU\n";
-//				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
 				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 					}
 				}
@@ -411,11 +423,9 @@ void MT_controller_funct(void *argument)
 				}
 				else{
 					char* str = "FREIOU\n";
-//				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
 				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 					}
 				}
-			//else if !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Deal with other commands
 
 		}
 		if(auth){}
