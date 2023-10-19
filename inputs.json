@@ -1,0 +1,18 @@
+{
+    "bluetooth":{
+        "lock":{
+            "id":9,
+            "locking":"00",
+            "unlocking":"01"
+        }
+    },
+    "sensors":{
+        "break":{
+            "pin":  "PA5",
+            "id":1,
+            "break":"00",
+            "release":"01"
+        }
+
+    }
+}

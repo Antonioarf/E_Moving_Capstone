@@ -7,10 +7,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -29,6 +31,27 @@ void printer(char msg){
 
 }
 
+char* osStatusToString(osStatus_t status) {
+    switch (status) {
+        case osOK:
+            return "OK: Operation completed successfully\r\n";
+        case osError:
+            return "osError: Unspecified error\r\n";
+        case osErrorTimeout:
+            return "Timeout: osErrorTimeout:  Operation timed out\r\n";
+        case osErrorResource:
+            return "Resource: osErrorResource: Resource not available\r\n";
+        case osErrorParameter:
+            return "Parameter: osErrorParameter: Parameter error\r\n";
+        case osErrorNoMemory:
+            return "NoMemory: osErrorNoMemory: System is out of memory\r\n";
+        default:
+            return "Unknown osStatus_t\r\n";
+    }
+}
+//osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+//char* str = osStatusToString(status);
+//HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
 /* USER CODE END PM */
 
@@ -56,10 +79,15 @@ const osThreadAttr_t Sensor_Read_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for BT_queue */
-osMessageQueueId_t BT_queueHandle;
-const osMessageQueueAttr_t BT_queue_attributes = {
-  .name = "BT_queue"
+/* Definitions for Input_queue */
+osMessageQueueId_t Input_queueHandle;
+const osMessageQueueAttr_t Input_queue_attributes = {
+  .name = "Input_queue"
+};
+/* Definitions for BT_send */
+osMessageQueueId_t BT_sendHandle;
+const osMessageQueueAttr_t BT_send_attributes = {
+  .name = "BT_send"
 };
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
@@ -121,8 +149,11 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of BT_queue */
-  BT_queueHandle = osMessageQueueNew (16, sizeof(command), &BT_queue_attributes);
+  /* creation of Input_queue */
+  Input_queueHandle = osMessageQueueNew (16, sizeof(command), &Input_queue_attributes);
+
+  /* creation of BT_send */
+  BT_sendHandle = osMessageQueueNew (16, sizeof(char*), &BT_send_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* USER CODE END RTOS_QUEUES */
@@ -237,13 +268,24 @@ static void MX_USART1_UART_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin : BREAK_Pin */
+  GPIO_InitStruct.Pin = BREAK_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BREAK_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
@@ -255,32 +297,50 @@ int FON_UART_Receive(char *received, uint16_t timeout) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
-//	unsigned char str[7] ="CHAMOU ";
-//    HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
     while (1) {
         status = HAL_UART_Receive(&huart1, &receivedChar, 1, timeout);
 
         if (status == HAL_OK) {
             if (receivedChar == '\n') {
-                // Received a newline character, terminate the string and return 1
-            	//received[index] = '\n';
             	received[index] = '\0';
 
                 return 1;
             } else {
-                // Store the received character in the buffer
                 received[index] = receivedChar;
                 index++;
             }
         } else {
-            // Handle error or timeout
-            received[0] = '\0'; // Null-terminate the string to indicate no data received
+            received[0] = '\0';
             return 0;
         }
     }
 }
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+	command com;
+
+	if (GPIO_Pin == BREAK_Pin) {
+		com.button_id 		= 1;
+		if (HAL_GPIO_ReadPin(BREAK_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
+			// Your code for rising edge -> apertou
+			com.button_status  	= 0;
+			osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+				if (status != osOK){
+				char* str = osStatusToString(status);
+				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+			}
+		} else {
+			// Your code for falling edge -> soltou
+			com.button_status  	= 1;
+			osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+			if (status != osOK){
+				char* str = osStatusToString(status);
+				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+			}
+		}
+	}
+}
 
 /* USER CODE END 4 */
 
@@ -290,25 +350,33 @@ void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
 	unsigned char str[14] ="\r\nIniciando \r\n";
+	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
+
+	char* res;
     char receivedData[32];
 	command com;
 
-    HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
-	//printer('2');
-//		sprintf(str, "\r\nTemp: %i\r\n",cont);
-		//		HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
-//		cont++;
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! COLOCAR SEMAFORO e interrupção
 	while (1) {
 	        if (FON_UART_Receive(receivedData,500)){
-	        	// Replace huart1 with your UART handle
 	        	if (strlen(receivedData)==3){
 	        		com.button_id 		= receivedData[0] - '0';
 					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0');
-					osMessageQueuePut(BT_queueHandle, &com, 0, 2000);
+					osMessageQueuePut(Input_queueHandle, &com, 0, 2000);
 	        	}
 	        }
+
+
+	        while (1){
+	        	if (osMessageQueueGet(BT_sendHandle, &res, NULL, 250) == osOK) {
+	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
+	        	}
+	        	if (osMessageQueueGetCount(BT_sendHandle)==0){
+	        		break;
+	        	}
+
+	        }
+
 	        //osDelay(1000);
 	        osThreadYield();
 	}
@@ -330,26 +398,34 @@ void MT_controller_funct(void *argument)
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
 
-//le da memoria de longa duracao
 	int auth = 0;
 	command com;
+	//int speed=0; // max = 255
 
 	while(1){
-		if (osMessageQueueGet(BT_queueHandle, &com, NULL, 2000)== osOK){
+		if (osMessageQueueGet(Input_queueHandle, &com, NULL, 2000)== osOK){
 			if(com.button_id==9){
 				auth = com.button_status;
 				if (auth){
-					unsigned char str[15];
-				    sprintf(str, "\r\n ABRIU %i \r\n", auth);
-					HAL_UART_Transmit(&huart1, str, sizeof(str), 1000);
+					char* str = "ABRIU\n";
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 				}
 				else{
-					unsigned char str[15];
-				    sprintf(str, "\r\n FECHOU %i \r\n", auth);
-					HAL_UART_Transmit(&huart1, str, sizeof(str), 1000);
+					char* str = "FECHOU\n";
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
 					}
 				}
-			//else if !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!TRATAR TODOS OS OUTROS COMs
+			else if(com.button_id==1){
+				auth = com.button_status;
+				if (auth){
+					char* str = "SOLTOU\n";
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
+				}
+				else{
+					char* str = "FREIOU\n";
+				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
+					}
+				}
 
 		}
 		if(auth){}
@@ -373,7 +449,7 @@ void Sensor_reader_funct(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    osDelay(100);
   }
   /* USER CODE END Sensor_reader_funct */
 }
