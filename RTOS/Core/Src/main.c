@@ -249,7 +249,7 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 0 */
 
-  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
@@ -258,19 +258,18 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 65535;
+  htim2.Init.Period = 4294967295;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
-  sConfig.IC1Polarity = TIM_ICPOLARITY_FALLING;
-  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
-  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
-  sConfig.IC2Polarity = TIM_ICPOLARITY_FALLING;
-  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
-  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 0;
-  if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
+  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
+  sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
+  sClockSourceConfig.ClockFilter = 15;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -281,7 +280,9 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-  HAL_TIM_Encoder_Start_IT(&htim2, TIM_CHANNEL_1);
+  //HAL_TIM_Encoder_Start_IT(&htim2, TIM_CHANNEL_1);
+  //HAL_TIM_IC_Start(&htim2,TIM_CHANNEL_1);
+  HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END TIM2_Init 2 */
 
 }
@@ -517,39 +518,63 @@ void MT_controller_funct(void *argument)
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
 
-	int auth = 0;
+	int lock = 0;
+	int brk = 0;
+	float freq, output = 0.0;
+	int freq_int;
+
 	command com;
+	char* input_command,decision;
 	//int speed=0; // max = 255
 
 	while(1){
 		if (osMessageQueueGet(Input_queueHandle, &com, NULL, 2000)== osOK){
 			if(com.button_id==9){
-				auth = com.button_status;
-				if (auth){
-					char* str = "ABRIU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-				}
-				else{
-					char* str = "FECHOU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-					}
-				}
+				lock = com.button_status;
+				if (lock){input_command = "lock\n";}
+				else{input_command = "UNlock\n";}
+			}
 			else if(com.button_id==1){
-				auth = com.button_status;
-				if (auth){
-					char* str = "SOLTOU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-				}
-				else{
-					char* str = "FREIOU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-					}
-				}
+				brk = com.button_status;
+				if (brk){ input_command = "FREIOU \n";}
+				else{ input_command = "SOLTOU\n";}
+			}
+			else if(com.button_id==2){
+					freq = (com.sensor_value)*1000;
+					input_command = "";
+					freq_int = (int) freq;
+					asprintf(&input_command, "RPM: %d\n", freq_int);
+			}
+			osMessageQueuePut(BT_sendHandle, &input_command, 0, 2000);
 
 		}
-		if(auth){}
-		//osDelay(1000);
-        osThreadYield();
+		else{
+			input_command = "No new input\n";
+			osMessageQueuePut(BT_sendHandle, &input_command, 0, 2000);
+
+		}
+
+
+		if(!lock){
+			if (!brk){
+				output = freq;
+			}
+			else{
+			output = 0;
+			}
+		}
+		else{
+			//call locking function
+			output = 0;
+		}
+
+		//activate motor
+
+		//return status to phone
+		asprintf(&decision, "OUTPUT: %d\n", (int)output);
+		osMessageQueuePut(BT_sendHandle, &decision, 0, 2000);
+        //osThreadYield();
+		osDelay(1000);
 
 	}
   /* USER CODE END MT_controller_funct */
@@ -566,13 +591,22 @@ void Sensor_reader_funct(void *argument)
 {
   /* USER CODE BEGIN Sensor_reader_funct */
   /* Infinite loop */
-	int cnt, oi;
-	uint32_t counter;
+	int delay = 2000;
+	float rpm_input, rpm_old = 0;
+	int counter;
+	command com;
+	com.button_id = 2;
 	while(1){
-        cnt	  = TIM2->CNT;
         counter = __HAL_TIM_GET_COUNTER(&htim2);
-        oi = 0;
-		osDelay(1000);
+        rpm_input =(float) counter/(PulsesPerRound*delay);
+		com.sensor_value = rpm_input;
+		if (counter != rpm_old){
+			osMessageQueuePut(Input_queueHandle, &com, 0, 500);
+		}
+		__HAL_TIM_SET_COUNTER(&htim2,0);
+
+		rpm_old = counter;
+		osDelay(delay);
         //osThreadYield();
 	}
   /* USER CODE END Sensor_reader_funct */
