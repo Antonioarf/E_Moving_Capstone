@@ -1,18 +1,49 @@
 {
-    "bluetooth":{
-        "lock":{
-            "id":9,
-            "locking":"00",
-            "unlocking":"01"
-        }
+    "UART":{
+
+            "bluetooth":{
+                    "UART": "UART_1",
+                    "baudrate": 9600,
+                    "TX pin": "Pc4",
+                    "RX pin": "Pc5"
+            },
+
+            "display":{
+                    "UART": "UART_2",
+                    "baudrate": 9600,
+                    "TX pin": "PA2", //gray jumper (rx in the board)
+                    "RX pin": "PA3", //purple jumper (tx in the board)
+                    "CTRL prin": "not determined"
+            },
+            "Commands":{
+
+                "lock":{
+                    "id":9,
+                    "locking":"00",
+                    "unlocking":"01"
+                }
+
+            }
     },
-    "sensors":{
-        "break":{
-            "pin":  "PA5",
+
+    "Digtal":{
+        "break 1":{
+            "pin":  ["PA5", "GND"],
             "id":1,
             "break":"00",
             "release":"01"
-        }
-
+        },
+        "break 2":{
+            "pin":  ["PA6", "GND"],
+            "id":1,
+            "break":"00",
+            "release":"01"
+        },
+        "pedal":{
+            "pin":  ["PA0", "GND", "VCC"],
+            "id":2,
+            "Signal": "range "
+        }   
     }
+
 }

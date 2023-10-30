@@ -57,9 +57,13 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define BREAK_Pin GPIO_PIN_5
-#define BREAK_GPIO_Port GPIOA
-#define BREAK_EXTI_IRQn EXTI9_5_IRQn
+#define PulsesPerRound 20
+#define BREAK_1_Pin GPIO_PIN_5
+#define BREAK_1_GPIO_Port GPIOA
+#define BREAK_1_EXTI_IRQn EXTI9_5_IRQn
+#define BREAK_2_Pin GPIO_PIN_6
+#define BREAK_2_GPIO_Port GPIOA
+#define BREAK_2_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
 

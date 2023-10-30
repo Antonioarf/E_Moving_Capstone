@@ -23,6 +23,7 @@
 /* USER CODE BEGIN PM */
 typedef struct {
 	 int button_id, button_status;
+	 float sensor_value;
 } command;
 
 void printer(char msg){
@@ -56,6 +57,8 @@ char* osStatusToString(osStatus_t status) {
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart1;
 
 /* Definitions for BT_reader */
@@ -96,6 +99,7 @@ const osMessageQueueAttr_t BT_send_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM2_Init(void);
 void BT_reader_funct(void *argument);
 void MT_controller_funct(void *argument);
 void Sensor_reader_funct(void *argument);
@@ -133,6 +137,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /* USER CODE END 2 */
 
@@ -199,10 +204,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -212,12 +220,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -227,6 +235,55 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_Encoder_InitTypeDef sConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_FALLING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_FALLING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+  HAL_TIM_Encoder_Start_IT(&htim2, TIM_CHANNEL_1);
+  /* USER CODE END TIM2_Init 2 */
+
 }
 
 /**
@@ -273,15 +330,22 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin : BREAK_Pin */
-  GPIO_InitStruct.Pin = BREAK_Pin;
+  /*Configure GPIO pin : BREAK_1_Pin */
+  GPIO_InitStruct.Pin = BREAK_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(BREAK_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(BREAK_1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BREAK_2_Pin */
+  GPIO_InitStruct.Pin = BREAK_2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BREAK_2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
@@ -293,13 +357,25 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-int FON_UART_Receive(char *received, uint16_t timeout) {
+
+
+
+
+
+
+
+
+
+
+
+
+int FON_UART_Receive(char *received, uint16_t timeout,UART_HandleTypeDef *huartX) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
 
     while (1) {
-        status = HAL_UART_Receive(&huart1, &receivedChar, 1, timeout);
+        status = HAL_UART_Receive(huartX, &receivedChar, 1, timeout);
 
         if (status == HAL_OK) {
             if (receivedChar == '\n') {
@@ -320,31 +396,75 @@ int FON_UART_Receive(char *received, uint16_t timeout) {
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	command com;
 
-	if (GPIO_Pin == BREAK_Pin) {
+	if (GPIO_Pin == BREAK_1_Pin ) {
 		com.button_id 		= 1;
-		if (HAL_GPIO_ReadPin(BREAK_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
+		if (HAL_GPIO_ReadPin(BREAK_1_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
 			// Your code for rising edge -> apertou
 			com.button_status  	= 0;
-			osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-				if (status != osOK){
-				char* str = osStatusToString(status);
-				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
-			}
 		} else {
 			// Your code for falling edge -> soltou
 			com.button_status  	= 1;
-			osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-			if (status != osOK){
-				char* str = osStatusToString(status);
-				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
-			}
+		}
+
+		osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+		if (status != osOK){
+			char* str = osStatusToString(status);
+			osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+		}
+	}
+	else if (GPIO_Pin == BREAK_2_Pin ) {
+		com.button_id 		= 1;
+		if (HAL_GPIO_ReadPin(BREAK_2_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
+			// Your code for rising edge -> apertou
+			com.button_status  	= 0;
+		} else {
+			// Your code for falling edge -> soltou
+			com.button_status  	= 1;
+		}
+
+		osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
+		if (status != osOK){
+			char* str = osStatusToString(status);
+			osMessageQueuePut(BT_sendHandle, &str, 0, 0);
 		}
 	}
 }
 
+
+
+//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+//	char str[30];
+    //osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
+//    if (FON_UART_Receive(str,500, huart)){
+//			osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
+//    }
+//}
+
+//void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+//{
+//	uint32_t counter = __HAL_TIM_GET_COUNTER(htim);
+
+//}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_BT_reader_funct */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* USER CODE END Header_BT_reader_funct */
 void BT_reader_funct(void *argument)
 {
@@ -358,14 +478,13 @@ void BT_reader_funct(void *argument)
 
 
 	while (1) {
-	        if (FON_UART_Receive(receivedData,500)){
+	        if (FON_UART_Receive(receivedData,500, &huart1)){
 	        	if (strlen(receivedData)==3){
 	        		com.button_id 		= receivedData[0] - '0';
 					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0');
 					osMessageQueuePut(Input_queueHandle, &com, 0, 2000);
 	        	}
 	        }
-
 
 	        while (1){
 	        	if (osMessageQueueGet(BT_sendHandle, &res, NULL, 250) == osOK) {
@@ -447,10 +566,15 @@ void Sensor_reader_funct(void *argument)
 {
   /* USER CODE BEGIN Sensor_reader_funct */
   /* Infinite loop */
-  for(;;)
-  {
-    osDelay(100);
-  }
+	int cnt, oi;
+	uint32_t counter;
+	while(1){
+        cnt	  = TIM2->CNT;
+        counter = __HAL_TIM_GET_COUNTER(&htim2);
+        oi = 0;
+		osDelay(1000);
+        //osThreadYield();
+	}
   /* USER CODE END Sensor_reader_funct */
 }
 
@@ -480,6 +604,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
+	char* str = "ERROR_HANDLER CALLED";
+	osMessageQueuePut(BT_sendHandle, &str, 0, 0);
   /* USER CODE END Error_Handler_Debug */
 }
 
