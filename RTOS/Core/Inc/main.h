@@ -49,6 +49,8 @@ extern "C" {
 
 /* USER CODE END EM */
 
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -57,9 +59,17 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define BREAK_Pin GPIO_PIN_5
-#define BREAK_GPIO_Port GPIOA
-#define BREAK_EXTI_IRQn EXTI9_5_IRQn
+#define rpm_min 10
+#define PulsesPerRound 20
+#define rpm_max 50
+#define pwm_max 255
+#define pwm_min 0
+#define BREAK_1_Pin GPIO_PIN_5
+#define BREAK_1_GPIO_Port GPIOA
+#define BREAK_1_EXTI_IRQn EXTI9_5_IRQn
+#define BREAK_2_Pin GPIO_PIN_6
+#define BREAK_2_GPIO_Port GPIOA
+#define BREAK_2_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
 

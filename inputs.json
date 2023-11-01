@@ -1,18 +1,48 @@
 {
-    "bluetooth":{
-        "lock":{
-            "id":9,
-            "locking":"00",
-            "unlocking":"01"
-        }
+    "UART":{
+
+            "bluetooth":{ //fixed 
+                    "UART": "UART_1",
+                    "baudrate": 9600,
+                    "TX pin": "Pc4",
+                    "RX pin": "Pc5"
+            },
+            "Commands":{
+                "lock":{
+                    "id":9,
+                    "locking":"00",
+                    "unlocking":"01"
+                }
+            }
     },
-    "sensors":{
-        "break":{
-            "pin":  "PA5",
+
+    "Digtal":{
+        "break 1":{ //can be changed
+            "pin":  ["PA5", "GND"],
             "id":1,
             "break":"00",
             "release":"01"
-        }
-
+        },
+        "break 2":{ //can be changed
+            "pin":  ["PA6", "GND"],
+            "id":1,
+            "break":"00",
+            "release":"01"
+        },
+        "pedal":{
+            "pin":  ["PA12", "GND", "VCC"],
+            "id":2,
+            "Signal": "the sensor counts number of turns for the pedal (8 signals per turn)"
+        },
+	"PWM output":{ //fixed 
+            "pin": "PA1",
+	    "Range": [1, 65535] 
+        }, 
+	"Rele output":{ //can be changed
+            "pin": "PC8",
+            "locking":"HIGH",
+            "unlocking":"LOW"
+        }, 
     }
+
 }

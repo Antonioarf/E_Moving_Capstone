@@ -21,16 +21,20 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+
+/**
+Struct to define the commands between tasks and the bluetooth
+*/
 typedef struct {
-	 int button_id, button_status;
+	 int button_id;
+	 int button_status;
+	 float sensor_value;
 } command;
 
-void printer(char msg){
-	ITM_SendChar(msg);
-	ITM_SendChar('\n');
-
-}
-
+/**
+This function is to convert the status mesages from FreeRTOS
+into strings to be sent via bluetooth in case of error
+*/
 char* osStatusToString(osStatus_t status) {
     switch (status) {
         case osOK:
@@ -49,45 +53,62 @@ char* osStatusToString(osStatus_t status) {
             return "Unknown osStatus_t\r\n";
     }
 }
-//osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-//char* str = osStatusToString(status);
-//HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
+
+
+/**
+Simple function to map the values beetween the pedal sensor and the motor PWM
+Later it should take in consideration other sensors such as gyro
+
+The constants used in this function are defined in the main.h file
+but should be edited via the controller.ioc file
+*/
+float MAP(int int_IN)
+{
+	 if (int_IN < rpm_min){return 0.0;}
+	 else if (int_IN > rpm_max){return pwm_max;}
+	 else{
+		return ((((int_IN - rpm_min)*(pwm_max - pwm_min))/(rpm_max - rpm_min)) + pwm_min);
+	 }
+}
 
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart1;
 
-/* Definitions for BT_reader */
-osThreadId_t BT_readerHandle;
-const osThreadAttr_t BT_reader_attributes = {
-  .name = "BT_reader",
+/* Definitions for bluetooth_task */
+osThreadId_t bluetooth_taskHandle;
+const osThreadAttr_t bluetooth_task_attributes = {
+  .name = "bluetooth_task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for MT_controller */
-osThreadId_t MT_controllerHandle;
-const osThreadAttr_t MT_controller_attributes = {
-  .name = "MT_controller",
+/* Definitions for motor_ctrl */
+osThreadId_t motor_ctrlHandle;
+const osThreadAttr_t motor_ctrl_attributes = {
+  .name = "motor_ctrl",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for Sensor_Read */
-osThreadId_t Sensor_ReadHandle;
-const osThreadAttr_t Sensor_Read_attributes = {
-  .name = "Sensor_Read",
+/* Definitions for sensors_task */
+osThreadId_t sensors_taskHandle;
+const osThreadAttr_t sensors_task_attributes = {
+  .name = "sensors_task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for Input_queue */
-osMessageQueueId_t Input_queueHandle;
-const osMessageQueueAttr_t Input_queue_attributes = {
-  .name = "Input_queue"
+/* Definitions for input_queue */
+osMessageQueueId_t input_queueHandle;
+const osMessageQueueAttr_t input_queue_attributes = {
+  .name = "input_queue"
 };
-/* Definitions for BT_send */
-osMessageQueueId_t BT_sendHandle;
-const osMessageQueueAttr_t BT_send_attributes = {
-  .name = "BT_send"
+/* Definitions for bluetooth_queue */
+osMessageQueueId_t bluetooth_queueHandle;
+const osMessageQueueAttr_t bluetooth_queue_attributes = {
+  .name = "bluetooth_queue"
 };
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
@@ -96,6 +117,8 @@ const osMessageQueueAttr_t BT_send_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
 void BT_reader_funct(void *argument);
 void MT_controller_funct(void *argument);
 void Sensor_reader_funct(void *argument);
@@ -133,6 +156,8 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART1_UART_Init();
+  MX_TIM1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /* USER CODE END 2 */
 
@@ -149,24 +174,24 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of Input_queue */
-  Input_queueHandle = osMessageQueueNew (16, sizeof(command), &Input_queue_attributes);
+  /* creation of input_queue */
+  input_queueHandle = osMessageQueueNew (16, sizeof(command), &input_queue_attributes);
 
-  /* creation of BT_send */
-  BT_sendHandle = osMessageQueueNew (16, sizeof(char*), &BT_send_attributes);
+  /* creation of bluetooth_queue */
+  bluetooth_queueHandle = osMessageQueueNew (16, sizeof(char*), &bluetooth_queue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of BT_reader */
-  BT_readerHandle = osThreadNew(BT_reader_funct, NULL, &BT_reader_attributes);
+  /* creation of bluetooth_task */
+  bluetooth_taskHandle = osThreadNew(BT_reader_funct, NULL, &bluetooth_task_attributes);
 
-  /* creation of MT_controller */
-  MT_controllerHandle = osThreadNew(MT_controller_funct, NULL, &MT_controller_attributes);
+  /* creation of motor_ctrl */
+  motor_ctrlHandle = osThreadNew(MT_controller_funct, NULL, &motor_ctrl_attributes);
 
-  /* creation of Sensor_Read */
-  Sensor_ReadHandle = osThreadNew(Sensor_reader_funct, NULL, &Sensor_Read_attributes);
+  /* creation of sensors_task */
+  sensors_taskHandle = osThreadNew(Sensor_reader_funct, NULL, &sensors_task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* USER CODE END RTOS_THREADS */
@@ -199,10 +224,13 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -212,21 +240,133 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_TIM1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
+  PeriphClkInit.Tim1ClockSelection = RCC_TIM1CLK_HCLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 0;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 65535;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
+  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
+  sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
+  sClockSourceConfig.ClockFilter = 15;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+  HAL_TIM_Base_Start_IT(&htim1);
+
+  /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = pwm_max;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+	TIM2->CCR1 = 0;
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
 }
 
 /**
@@ -273,15 +413,22 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin : BREAK_Pin */
-  GPIO_InitStruct.Pin = BREAK_Pin;
+  /*Configure GPIO pin : BREAK_1_Pin */
+  GPIO_InitStruct.Pin = BREAK_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(BREAK_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(BREAK_1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BREAK_2_Pin */
+  GPIO_InitStruct.Pin = BREAK_2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BREAK_2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
@@ -293,63 +440,99 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-int FON_UART_Receive(char *received, uint16_t timeout) {
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * Since the available function HAL_UART_Receive reads a predetermined amount of bytes
+ * this function  was developt to try to read until finds the \n char
+*/
+int FON_UART_Receive(char *received, uint16_t timeout,UART_HandleTypeDef *huartX) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
-
     while (1) {
-        status = HAL_UART_Receive(&huart1, &receivedChar, 1, timeout);
+        status = HAL_UART_Receive(huartX, &receivedChar, 1, timeout); //tries to read next availabe byte in the buffer
 
-        if (status == HAL_OK) {
+        if (status == HAL_OK) { //verifies if the read was succesfull
             if (receivedChar == '\n') {
             	received[index] = '\0';
-
-                return 1;
-            } else {
-                received[index] = receivedChar;
-                index++;
+                return 1; //returns success value
             }
-        } else {
+            else {
+                received[index] = receivedChar;
+                index++; //keeps reading
+            }
+        }
+        else {
             received[0] = '\0';
-            return 0;
+            return 0; //returns error value
         }
     }
 }
 
+
+/*
+ * Callbeck for the interruption from some IO pins
+ * In our case, both brake handles are dealt with here
+ * by simmply adding the correct  command in the queue
+ *
+ * Import to note that in interruptions, the waittime argument for queues MUST be 0
+*/
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	command com;
 
-	if (GPIO_Pin == BREAK_Pin) {
+	if (GPIO_Pin == BREAK_1_Pin ) {
 		com.button_id 		= 1;
-		if (HAL_GPIO_ReadPin(BREAK_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
-			// Your code for rising edge -> apertou
+		if (HAL_GPIO_ReadPin(BREAK_1_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) { //because of this line, it was necessary to split both pins
+			// Your code for rising edge -> released
 			com.button_status  	= 0;
-			osStatus_t status=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-				if (status != osOK){
-				char* str = osStatusToString(status);
-				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
-			}
-		} else {
-			// Your code for falling edge -> soltou
-			com.button_status  	= 1;
-			osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-			if (status != osOK){
-				char* str = osStatusToString(status);
-				osMessageQueuePut(BT_sendHandle, &str, 0, 0);
-			}
 		}
+		else {
+			// Your code for falling edge -> pressed
+			com.button_status  	= 1;
+		}
+	}
+	else if (GPIO_Pin == BREAK_2_Pin ) {
+		com.button_id 		= 1;
+		if (HAL_GPIO_ReadPin(BREAK_2_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
+			// Your code for rising edge -> released
+			com.button_status  	= 0;
+		} else {
+			// Your code for falling edge -> pressed
+			com.button_status  	= 1;
+		}
+	}
+
+	osStatus_t status 	=  osMessageQueuePut(input_queueHandle, &com, 0, 0); //this block tries to sent to the  input_queue
+	if (status != osOK){													 // in case it  fails,
+		char* str = osStatusToString(status);								 // then sent the error to the bluetooth_queue
+		osMessageQueuePut(bluetooth_queueHandle, &str, 0, 0);
 	}
 }
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_BT_reader_funct */
-/* USER CODE END Header_BT_reader_funct */
+
+/* USER CODE BEGIN BT_reader_funct */
+/**
+* @brief Function implementing the BT_reader_funct thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END BT_reader_funct */
 void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	unsigned char str[14] ="\r\nIniciando \r\n";
+	unsigned char str[8] ="\r\nInit\r\n";  //initial post to confirm
 	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
 	char* res;
@@ -358,20 +541,19 @@ void BT_reader_funct(void *argument)
 
 
 	while (1) {
-	        if (FON_UART_Receive(receivedData,500)){
-	        	if (strlen(receivedData)==3){
-	        		com.button_id 		= receivedData[0] - '0';
-					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0');
-					osMessageQueuePut(Input_queueHandle, &com, 0, 2000);
+	        if (FON_UART_Receive(receivedData,500, &huart1)){
+	        	if (strlen(receivedData)==3){ //strlen function returns the "used" len of a string, not the allocated size
+	        		com.button_id 		= receivedData[0] - '0'; //the commands come in the form of 3 digits, so this 2 lines turn
+					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0'); //the string of len3 into 2 ints
+					osMessageQueuePut(input_queueHandle, &com, 0, 2000);
 	        	}
 	        }
 
-
 	        while (1){
-	        	if (osMessageQueueGet(BT_sendHandle, &res, NULL, 250) == osOK) {
+	        	if (osMessageQueueGet(bluetooth_queueHandle, &res, NULL, 250) == osOK) {
 	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
 	        	}
-	        	if (osMessageQueueGetCount(BT_sendHandle)==0){
+	        	if (osMessageQueueGetCount(bluetooth_queueHandle)==0){
 	        		break;
 	        	}
 
@@ -398,39 +580,68 @@ void MT_controller_funct(void *argument)
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
 
-	int auth = 0;
+	//variables for the finite state machine
+	int lock = 0; 		//binary indicator for the  locking
+	int brk = 0;  		//binary indicator for the  brake
+	float freq = 0.0; 	//float for the  frequencie sent by the sensor
+	float output = 0.0; //float for the  frequencie post MAP function
+	int freq_int; 		//int  to sent to the bluetooth the value of  freq (I had issues formating string with float)
+
 	command com;
-	//int speed=0; // max = 255
+	char* input_command,decision;
 
 	while(1){
-		if (osMessageQueueGet(Input_queueHandle, &com, NULL, 2000)== osOK){
+		if (osMessageQueueGet(input_queueHandle, &com, NULL, 2000)== osOK){
 			if(com.button_id==9){
-				auth = com.button_status;
-				if (auth){
-					char* str = "ABRIU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-				}
-				else{
-					char* str = "FECHOU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-					}
-				}
+				lock = com.button_status;
+				if (lock){input_command = "lock\n";} 	//this lines just return the action to the bluetooth
+				else{input_command = "UNlock\n";}		// might delete them in the final version
+			}
 			else if(com.button_id==1){
-				auth = com.button_status;
-				if (auth){
-					char* str = "SOLTOU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-				}
-				else{
-					char* str = "FREIOU\n";
-				    osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-					}
-				}
+				brk = com.button_status;
+				if (brk){ input_command = "FREIOU \n";} //this lines just return the action to the bluetooth
+				else{ input_command = "SOLTOU\n";}		// might delete them in the final version
+			}
+			else if(com.button_id==2){
+					freq = (com.sensor_value)*1000;
+					input_command = "";					//this lines just return the action to the bluetooth
+					freq_int = (int) freq;				// might delete them in the final version
+					asprintf(&input_command, "RPM: %d\n", freq_int);
+			}
+			osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
 
 		}
-		if(auth){}
-		//osDelay(1000);
-        osThreadYield();
+		else{
+			input_command = "No new input\n";
+			osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
+
+		}
+
+
+		if(!lock){
+			if (!brk){
+				//normal movemente
+				output = MAP(freq);
+			}
+			else{
+				//nether motor or lock
+			output = 0;
+			}
+		}
+		else{
+			//call locking function
+			// it is still not defined what to do when locking the bike
+			//but the code will go here
+			output = 0;
+		}
+
+		//activate motor
+		TIM2->CCR1 = output;
+		//return status to phone
+		asprintf(&decision, "OUTPUT: %d\n", (int)output);
+		osMessageQueuePut(bluetooth_queueHandle, &decision, 0, 2000);
+        //osThreadYield();
+		osDelay(1000);
 
 	}
   /* USER CODE END MT_controller_funct */
@@ -447,12 +658,27 @@ void Sensor_reader_funct(void *argument)
 {
   /* USER CODE BEGIN Sensor_reader_funct */
   /* Infinite loop */
-  for(;;)
-  {
-    osDelay(100);
-  }
+	int delay = 2000;				//int to define  how often the sensors will be read
+	float rpm_input, rpm_old = 0;	// both current and old pedal measures
+	int counter;					// value read from the periferal
+	command com;
+	com.button_id = 2;				// code of the comand to be sent
+	while(1){
+        counter = __HAL_TIM_GET_COUNTER(&htim1); //getter for the nummber of pulses
+        rpm_input =(float) counter/(PulsesPerRound*delay);
+		com.sensor_value = rpm_input;
+		if (counter != rpm_old){
+			osMessageQueuePut(input_queueHandle, &com, 0, 500);
+		}
+		__HAL_TIM_SET_COUNTER(&htim1,0);
+
+		rpm_old = counter;
+		osDelay(delay);
+        //osThreadYield();
+	}
   /* USER CODE END Sensor_reader_funct */
 }
+
 
 /**
   * @brief  Period elapsed callback in non blocking mode
@@ -480,6 +706,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
+	char* str = "ERROR_HANDLER CALLED";
+	osMessageQueuePut(bluetooth_queueHandle, &str, 0, 0);
   /* USER CODE END Error_Handler_Debug */
 }
 
