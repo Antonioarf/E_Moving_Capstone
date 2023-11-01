@@ -21,17 +21,20 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
+
+/**
+Struct to define the commands between tasks and the bluetooth
+*/
 typedef struct {
-	 int button_id, button_status;
+	 int button_id;
+	 int button_status;
 	 float sensor_value;
 } command;
 
-void printer(char msg){
-	ITM_SendChar(msg);
-	ITM_SendChar('\n');
-
-}
-
+/**
+This function is to convert the status mesages from FreeRTOS
+into strings to be sent via bluetooth in case of error
+*/
 char* osStatusToString(osStatus_t status) {
     switch (status) {
         case osOK:
@@ -51,15 +54,21 @@ char* osStatusToString(osStatus_t status) {
     }
 }
 
+
+/**
+Simple function to map the values beetween the pedal sensor and the motor PWM
+Later it should take in consideration other sensors such as gyro
+
+The constants used in this function are defined in the main.h file
+but should be edited via the controller.ioc file
+*/
 float MAP(int int_IN)
 {
 	 if (int_IN < rpm_min){return 0.0;}
 	 else if (int_IN > rpm_max){return pwm_max;}
 	 else{
 		return ((((int_IN - rpm_min)*(pwm_max - pwm_min))/(rpm_max - rpm_min)) + pwm_min);
-
 	 }
-
 }
 
 /* USER CODE END PM */
@@ -70,36 +79,36 @@ TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 
-/* Definitions for BT_reader */
-osThreadId_t BT_readerHandle;
-const osThreadAttr_t BT_reader_attributes = {
-  .name = "BT_reader",
+/* Definitions for bluetooth_task */
+osThreadId_t bluetooth_taskHandle;
+const osThreadAttr_t bluetooth_task_attributes = {
+  .name = "bluetooth_task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for MT_controller */
-osThreadId_t MT_controllerHandle;
-const osThreadAttr_t MT_controller_attributes = {
-  .name = "MT_controller",
+/* Definitions for motor_ctrl */
+osThreadId_t motor_ctrlHandle;
+const osThreadAttr_t motor_ctrl_attributes = {
+  .name = "motor_ctrl",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
-/* Definitions for Sensor_Read */
-osThreadId_t Sensor_ReadHandle;
-const osThreadAttr_t Sensor_Read_attributes = {
-  .name = "Sensor_Read",
+/* Definitions for sensors_task */
+osThreadId_t sensors_taskHandle;
+const osThreadAttr_t sensors_task_attributes = {
+  .name = "sensors_task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for Input_queue */
-osMessageQueueId_t Input_queueHandle;
-const osMessageQueueAttr_t Input_queue_attributes = {
-  .name = "Input_queue"
+/* Definitions for input_queue */
+osMessageQueueId_t input_queueHandle;
+const osMessageQueueAttr_t input_queue_attributes = {
+  .name = "input_queue"
 };
-/* Definitions for BT_send */
-osMessageQueueId_t BT_sendHandle;
-const osMessageQueueAttr_t BT_send_attributes = {
-  .name = "BT_send"
+/* Definitions for bluetooth_queue */
+osMessageQueueId_t bluetooth_queueHandle;
+const osMessageQueueAttr_t bluetooth_queue_attributes = {
+  .name = "bluetooth_queue"
 };
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
@@ -165,24 +174,24 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* creation of Input_queue */
-  Input_queueHandle = osMessageQueueNew (16, sizeof(command), &Input_queue_attributes);
+  /* creation of input_queue */
+  input_queueHandle = osMessageQueueNew (16, sizeof(command), &input_queue_attributes);
 
-  /* creation of BT_send */
-  BT_sendHandle = osMessageQueueNew (16, sizeof(char*), &BT_send_attributes);
+  /* creation of bluetooth_queue */
+  bluetooth_queueHandle = osMessageQueueNew (16, sizeof(char*), &bluetooth_queue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of BT_reader */
-  BT_readerHandle = osThreadNew(BT_reader_funct, NULL, &BT_reader_attributes);
+  /* creation of bluetooth_task */
+  bluetooth_taskHandle = osThreadNew(BT_reader_funct, NULL, &bluetooth_task_attributes);
 
-  /* creation of MT_controller */
-  MT_controllerHandle = osThreadNew(MT_controller_funct, NULL, &MT_controller_attributes);
+  /* creation of motor_ctrl */
+  motor_ctrlHandle = osThreadNew(MT_controller_funct, NULL, &motor_ctrl_attributes);
 
-  /* creation of Sensor_Read */
-  Sensor_ReadHandle = osThreadNew(Sensor_reader_funct, NULL, &Sensor_Read_attributes);
+  /* creation of sensors_task */
+  sensors_taskHandle = osThreadNew(Sensor_reader_funct, NULL, &sensors_task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* USER CODE END RTOS_THREADS */
@@ -353,6 +362,8 @@ static void MX_TIM2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
+	TIM2->CCR1 = 0;
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
 
@@ -440,108 +451,88 @@ static void MX_GPIO_Init(void)
 
 
 
-
+/*
+ * Since the available function HAL_UART_Receive reads a predetermined amount of bytes
+ * this function  was developt to try to read until finds the \n char
+*/
 int FON_UART_Receive(char *received, uint16_t timeout,UART_HandleTypeDef *huartX) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
-
     while (1) {
-        status = HAL_UART_Receive(huartX, &receivedChar, 1, timeout);
+        status = HAL_UART_Receive(huartX, &receivedChar, 1, timeout); //tries to read next availabe byte in the buffer
 
-        if (status == HAL_OK) {
+        if (status == HAL_OK) { //verifies if the read was succesfull
             if (receivedChar == '\n') {
             	received[index] = '\0';
-
-                return 1;
-            } else {
-                received[index] = receivedChar;
-                index++;
+                return 1; //returns success value
             }
-        } else {
+            else {
+                received[index] = receivedChar;
+                index++; //keeps reading
+            }
+        }
+        else {
             received[0] = '\0';
-            return 0;
+            return 0; //returns error value
         }
     }
 }
 
+
+/*
+ * Callbeck for the interruption from some IO pins
+ * In our case, both brake handles are dealt with here
+ * by simmply adding the correct  command in the queue
+ *
+ * Import to note that in interruptions, the waittime argument for queues MUST be 0
+*/
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	command com;
 
 	if (GPIO_Pin == BREAK_1_Pin ) {
 		com.button_id 		= 1;
-		if (HAL_GPIO_ReadPin(BREAK_1_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
-			// Your code for rising edge -> apertou
+		if (HAL_GPIO_ReadPin(BREAK_1_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) { //because of this line, it was necessary to split both pins
+			// Your code for rising edge -> released
 			com.button_status  	= 0;
-		} else {
-			// Your code for falling edge -> soltou
-			com.button_status  	= 1;
 		}
-
-		osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-		if (status != osOK){
-			char* str = osStatusToString(status);
-			osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+		else {
+			// Your code for falling edge -> pressed
+			com.button_status  	= 1;
 		}
 	}
 	else if (GPIO_Pin == BREAK_2_Pin ) {
 		com.button_id 		= 1;
 		if (HAL_GPIO_ReadPin(BREAK_2_GPIO_Port, GPIO_Pin) == GPIO_PIN_SET) {
-			// Your code for rising edge -> apertou
+			// Your code for rising edge -> released
 			com.button_status  	= 0;
 		} else {
-			// Your code for falling edge -> soltou
+			// Your code for falling edge -> pressed
 			com.button_status  	= 1;
 		}
+	}
 
-		osStatus_t status 	=  osMessageQueuePut(Input_queueHandle, &com, 0, 0);
-		if (status != osOK){
-			char* str = osStatusToString(status);
-			osMessageQueuePut(BT_sendHandle, &str, 0, 0);
-		}
+	osStatus_t status 	=  osMessageQueuePut(input_queueHandle, &com, 0, 0); //this block tries to sent to the  input_queue
+	if (status != osOK){													 // in case it  fails,
+		char* str = osStatusToString(status);								 // then sent the error to the bluetooth_queue
+		osMessageQueuePut(bluetooth_queueHandle, &str, 0, 0);
 	}
 }
 
-
-
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-//	char str[30];
-    //osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-//    if (FON_UART_Receive(str,500, huart)){
-//			osMessageQueuePut(BT_sendHandle, &str, 0, 2000);
-//    }
-//}
-
-//void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
-//{
-//	uint32_t counter = __HAL_TIM_GET_COUNTER(htim);
-
-//}
-
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_BT_reader_funct */
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* USER CODE END Header_BT_reader_funct */
+/* USER CODE BEGIN BT_reader_funct */
+/**
+* @brief Function implementing the BT_reader_funct thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END BT_reader_funct */
 void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	unsigned char str[14] ="\r\nIniciando \r\n";
+	unsigned char str[8] ="\r\nInit\r\n";  //initial post to confirm
 	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
 	char* res;
@@ -551,18 +542,18 @@ void BT_reader_funct(void *argument)
 
 	while (1) {
 	        if (FON_UART_Receive(receivedData,500, &huart1)){
-	        	if (strlen(receivedData)==3){
-	        		com.button_id 		= receivedData[0] - '0';
-					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0');
-					osMessageQueuePut(Input_queueHandle, &com, 0, 2000);
+	        	if (strlen(receivedData)==3){ //strlen function returns the "used" len of a string, not the allocated size
+	        		com.button_id 		= receivedData[0] - '0'; //the commands come in the form of 3 digits, so this 2 lines turn
+					com.button_status  	= 10*(receivedData[1] - '0') + (receivedData[2] - '0'); //the string of len3 into 2 ints
+					osMessageQueuePut(input_queueHandle, &com, 0, 2000);
 	        	}
 	        }
 
 	        while (1){
-	        	if (osMessageQueueGet(BT_sendHandle, &res, NULL, 250) == osOK) {
+	        	if (osMessageQueueGet(bluetooth_queueHandle, &res, NULL, 250) == osOK) {
 	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
 	        	}
-	        	if (osMessageQueueGetCount(BT_sendHandle)==0){
+	        	if (osMessageQueueGetCount(bluetooth_queueHandle)==0){
 	        		break;
 	        	}
 
@@ -589,63 +580,66 @@ void MT_controller_funct(void *argument)
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
 
-	int lock = 0;
-	int brk = 0;
-	float freq, output = 0.0;
-	int freq_int;
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-  TIM1->CCR1 = output;
+	//variables for the finite state machine
+	int lock = 0; 		//binary indicator for the  locking
+	int brk = 0;  		//binary indicator for the  brake
+	float freq = 0.0; 	//float for the  frequencie sent by the sensor
+	float output = 0.0; //float for the  frequencie post MAP function
+	int freq_int; 		//int  to sent to the bluetooth the value of  freq (I had issues formating string with float)
+
 	command com;
 	char* input_command,decision;
-	//int speed=0; // max = 255
 
 	while(1){
-		if (osMessageQueueGet(Input_queueHandle, &com, NULL, 2000)== osOK){
+		if (osMessageQueueGet(input_queueHandle, &com, NULL, 2000)== osOK){
 			if(com.button_id==9){
 				lock = com.button_status;
-				if (lock){input_command = "lock\n";}
-				else{input_command = "UNlock\n";}
+				if (lock){input_command = "lock\n";} 	//this lines just return the action to the bluetooth
+				else{input_command = "UNlock\n";}		// might delete them in the final version
 			}
 			else if(com.button_id==1){
 				brk = com.button_status;
-				if (brk){ input_command = "FREIOU \n";}
-				else{ input_command = "SOLTOU\n";}
+				if (brk){ input_command = "FREIOU \n";} //this lines just return the action to the bluetooth
+				else{ input_command = "SOLTOU\n";}		// might delete them in the final version
 			}
 			else if(com.button_id==2){
 					freq = (com.sensor_value)*1000;
-					input_command = "";
-					freq_int = (int) freq;
+					input_command = "";					//this lines just return the action to the bluetooth
+					freq_int = (int) freq;				// might delete them in the final version
 					asprintf(&input_command, "RPM: %d\n", freq_int);
 			}
-			osMessageQueuePut(BT_sendHandle, &input_command, 0, 2000);
+			osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
 
 		}
 		else{
 			input_command = "No new input\n";
-			osMessageQueuePut(BT_sendHandle, &input_command, 0, 2000);
+			osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
 
 		}
 
 
 		if(!lock){
 			if (!brk){
+				//normal movemente
 				output = MAP(freq);
-
 			}
 			else{
-			output = 666;
+				//nether motor or lock
+			output = 0;
 			}
 		}
 		else{
 			//call locking function
-			output = 666;
+			// it is still not defined what to do when locking the bike
+			//but the code will go here
+			output = 0;
 		}
 
 		//activate motor
 		TIM2->CCR1 = output;
 		//return status to phone
 		asprintf(&decision, "OUTPUT: %d\n", (int)output);
-		osMessageQueuePut(BT_sendHandle, &decision, 0, 2000);
+		osMessageQueuePut(bluetooth_queueHandle, &decision, 0, 2000);
         //osThreadYield();
 		osDelay(1000);
 
@@ -664,17 +658,17 @@ void Sensor_reader_funct(void *argument)
 {
   /* USER CODE BEGIN Sensor_reader_funct */
   /* Infinite loop */
-	int delay = 2000;
-	float rpm_input, rpm_old = 0;
-	int counter;
+	int delay = 2000;				//int to define  how often the sensors will be read
+	float rpm_input, rpm_old = 0;	// both current and old pedal measures
+	int counter;					// value read from the periferal
 	command com;
-	com.button_id = 2;
+	com.button_id = 2;				// code of the comand to be sent
 	while(1){
-        counter = __HAL_TIM_GET_COUNTER(&htim1);
+        counter = __HAL_TIM_GET_COUNTER(&htim1); //getter for the nummber of pulses
         rpm_input =(float) counter/(PulsesPerRound*delay);
 		com.sensor_value = rpm_input;
 		if (counter != rpm_old){
-			osMessageQueuePut(Input_queueHandle, &com, 0, 500);
+			osMessageQueuePut(input_queueHandle, &com, 0, 500);
 		}
 		__HAL_TIM_SET_COUNTER(&htim1,0);
 
@@ -684,6 +678,7 @@ void Sensor_reader_funct(void *argument)
 	}
   /* USER CODE END Sensor_reader_funct */
 }
+
 
 /**
   * @brief  Period elapsed callback in non blocking mode
@@ -712,7 +707,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
 	char* str = "ERROR_HANDLER CALLED";
-	osMessageQueuePut(BT_sendHandle, &str, 0, 0);
+	osMessageQueuePut(bluetooth_queueHandle, &str, 0, 0);
   /* USER CODE END Error_Handler_Debug */
 }
 

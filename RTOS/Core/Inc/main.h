@@ -62,7 +62,7 @@ void Error_Handler(void);
 #define rpm_min 10
 #define PulsesPerRound 20
 #define rpm_max 50
-#define pwm_max 100-1
+#define pwm_max 255
 #define pwm_min 0
 #define BREAK_1_Pin GPIO_PIN_5
 #define BREAK_1_GPIO_Port GPIOA
