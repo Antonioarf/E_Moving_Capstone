@@ -29,6 +29,11 @@
             "break":"00",
             "release":"01"
         },
+	"RELE ctrl":{ //can be changed
+            "pin":  ["Pc8", "GND"],
+            "short":"01",
+            "esc":"00"
+        },
         "pedal":{
             "pin":  ["PA12", "GND", "VCC"],
             "id":2,

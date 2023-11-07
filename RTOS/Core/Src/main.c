@@ -62,18 +62,20 @@ Later it should take in consideration other sensors such as gyro
 The constants used in this function are defined in the main.h file
 but should be edited via the controller.ioc file
 */
-float MAP(int int_IN)
+float MAP(float int_IN)
 {
-	 if (int_IN < rpm_min){return 0.0;}
-	 else if (int_IN > rpm_max){return pwm_max;}
+	 if (int_IN < pedal_min){return 0.0;}
+	 else if (int_IN > pedal_max){return pwm_max;}
 	 else{
-		return ((((int_IN - rpm_min)*(pwm_max - pwm_min))/(rpm_max - rpm_min)) + pwm_min);
+		return ((((int_IN - pedal_min)*(pwm_max - pwm_min))/(pedal_max - pedal_min)) + pwm_min);
 	 }
 }
 
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+RTC_HandleTypeDef hrtc;
+
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
@@ -119,6 +121,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_RTC_Init(void);
 void BT_reader_funct(void *argument);
 void MT_controller_funct(void *argument);
 void Sensor_reader_funct(void *argument);
@@ -158,6 +161,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   /* USER CODE END 2 */
 
@@ -224,10 +228,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -249,13 +254,50 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_TIM1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_RTC
+                              |RCC_PERIPHCLK_TIM1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
+  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
   PeriphClkInit.Tim1ClockSelection = RCC_TIM1CLK_HCLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+
+  /* USER CODE END RTC_Init 2 */
+
 }
 
 /**
@@ -288,7 +330,7 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
-  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
+  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_INVERTED;
   sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
   sClockSourceConfig.ClockFilter = 15;
   if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
@@ -329,11 +371,11 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 720;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = pwm_max;
+  htim2.Init.Period = 1000;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
   {
     Error_Handler();
@@ -357,13 +399,12 @@ static void MX_TIM2_Init(void)
   sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-	TIM2->CCR1 = 0;
+
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
 
@@ -418,6 +459,9 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : BREAK_1_Pin */
   GPIO_InitStruct.Pin = BREAK_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
@@ -427,8 +471,15 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : BREAK_2_Pin */
   GPIO_InitStruct.Pin = BREAK_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BREAK_2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : rele_ctrl_Pin */
+  GPIO_InitStruct.Pin = rele_ctrl_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(rele_ctrl_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
@@ -519,27 +570,35 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	}
 }
 
+
+
+void backup_write(uint32_t reg){
+	   HAL_PWR_EnableBkUpAccess();
+	   // Writes a data in a RTC Backup data Register 1
+	   HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR0, reg);
+	   HAL_PWR_DisableBkUpAccess();
+}
 /* USER CODE END 4 */
 
-
-/* USER CODE BEGIN BT_reader_funct */
+/* USER CODE BEGIN Header_BT_reader_funct */
 /**
-* @brief Function implementing the BT_reader_funct thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END BT_reader_funct */
+  * @brief  Function implementing the bluetooth_task thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_BT_reader_funct */
 void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
 	unsigned char str[8] ="\r\nInit\r\n";  //initial post to confirm
 	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
+
+
+
 	char* res;
     char receivedData[32];
 	command com;
-
-
 	while (1) {
 	        if (FON_UART_Receive(receivedData,500, &huart1)){
 	        	if (strlen(receivedData)==3){ //strlen function returns the "used" len of a string, not the allocated size
@@ -579,6 +638,7 @@ void MT_controller_funct(void *argument)
 {
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
 	//variables for the finite state machine
 	int lock = 0; 		//binary indicator for the  locking
@@ -589,13 +649,30 @@ void MT_controller_funct(void *argument)
 
 	command com;
 	char* input_command,decision;
+	uint32_t reg = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR0);
+
+	 if ((reg != 0) && (reg != 1) ){
+			   // Write Back Up Register 1 Data
+		 	   backup_write(0);
+			   asprintf(&input_command, "Starting value: %d\n", 0);
+			   osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
+	 }
+	 else{
+			 lock = (int) reg;
+			 asprintf(&input_command, "MEM read: %d\n", lock);
+			 osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
+
+	 }
+
 
 	while(1){
 		if (osMessageQueueGet(input_queueHandle, &com, NULL, 2000)== osOK){
 			if(com.button_id==9){
 				lock = com.button_status;
-				if (lock){input_command = "lock\n";} 	//this lines just return the action to the bluetooth
+				if (lock){
+					input_command = "lock\n";} 	//this lines just return the action to the bluetooth
 				else{input_command = "UNlock\n";}		// might delete them in the final version
+				backup_write(lock);
 			}
 			else if(com.button_id==1){
 				brk = com.button_status;
@@ -606,7 +683,7 @@ void MT_controller_funct(void *argument)
 					freq = (com.sensor_value)*1000;
 					input_command = "";					//this lines just return the action to the bluetooth
 					freq_int = (int) freq;				// might delete them in the final version
-					asprintf(&input_command, "RPM: %d\n", freq_int);
+					asprintf(&input_command, "FREQ(Hz): %d\n", freq_int);
 			}
 			osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
 
@@ -625,18 +702,19 @@ void MT_controller_funct(void *argument)
 			}
 			else{
 				//nether motor or lock
-			output = 0;
+			output = pwm_min;
 			}
+			HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, 0);
+			htim2.Instance->CCR1 = output;
 		}
 		else{
 			//call locking function
 			// it is still not defined what to do when locking the bike
 			//but the code will go here
-			output = 0;
+			HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, 1);
+			htim2.Instance->CCR1 = pwm_min;
 		}
 
-		//activate motor
-		TIM2->CCR1 = output;
 		//return status to phone
 		asprintf(&decision, "OUTPUT: %d\n", (int)output);
 		osMessageQueuePut(bluetooth_queueHandle, &decision, 0, 2000);
@@ -665,7 +743,7 @@ void Sensor_reader_funct(void *argument)
 	com.button_id = 2;				// code of the comand to be sent
 	while(1){
         counter = __HAL_TIM_GET_COUNTER(&htim1); //getter for the nummber of pulses
-        rpm_input =(float) counter/(PulsesPerRound*delay);
+        rpm_input =(float) 1.0*counter/(PulsesPerRound*delay);
 		com.sensor_value = rpm_input;
 		if (counter != rpm_old){
 			osMessageQueuePut(input_queueHandle, &com, 0, 500);
@@ -678,7 +756,6 @@ void Sensor_reader_funct(void *argument)
 	}
   /* USER CODE END Sensor_reader_funct */
 }
-
 
 /**
   * @brief  Period elapsed callback in non blocking mode
