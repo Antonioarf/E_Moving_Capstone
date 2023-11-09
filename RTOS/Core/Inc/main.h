@@ -59,11 +59,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define pedal_min 5
-#define pedal_max 20
+#define PulsesPerRound 12
+#define pedal_max 15
+#define pedal_min 3
 #define pwm_max 200
 #define pwm_min 100
-#define PulsesPerRound 12
+#define minute 60000
 #define BREAK_1_Pin GPIO_PIN_5
 #define BREAK_1_GPIO_Port GPIOA
 #define BREAK_1_EXTI_IRQn EXTI9_5_IRQn

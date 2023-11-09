@@ -12,6 +12,11 @@
                     "id":9,
                     "locking":"00",
                     "unlocking":"01"
+                },
+                "lock_timer":{
+                    "id":3,
+                    "locking":"00",
+                    "unlocking":"01"
                 }
             }
     },
