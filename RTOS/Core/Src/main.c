@@ -62,18 +62,20 @@ Later it should take in consideration other sensors such as gyro
 The constants used in this function are defined in the main.h file
 but should be edited via the controller.ioc file
 */
-float MAP(int int_IN)
+float MAP(float int_IN)
 {
-	 if (int_IN < rpm_min){return 0.0;}
-	 else if (int_IN > rpm_max){return pwm_max;}
+	 if (int_IN < pedal_min){return pwm_min;}
+	 else if (int_IN > pedal_max){return pwm_max;}
 	 else{
-		return ((((int_IN - rpm_min)*(pwm_max - pwm_min))/(rpm_max - rpm_min)) + pwm_min);
+		return ((((int_IN - pedal_min)*(pwm_max - pwm_min))/(pedal_max - pedal_min)) + pwm_min);
 	 }
 }
 
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+RTC_HandleTypeDef hrtc;
+
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
@@ -110,6 +112,11 @@ osMessageQueueId_t bluetooth_queueHandle;
 const osMessageQueueAttr_t bluetooth_queue_attributes = {
   .name = "bluetooth_queue"
 };
+/* Definitions for timer_trava */
+osTimerId_t timer_travaHandle;
+const osTimerAttr_t timer_trava_attributes = {
+  .name = "timer_trava"
+};
 /* USER CODE BEGIN PV */
 /* USER CODE END PV */
 
@@ -119,9 +126,11 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_RTC_Init(void);
 void BT_reader_funct(void *argument);
 void MT_controller_funct(void *argument);
 void Sensor_reader_funct(void *argument);
+void callback_timer_trava(void *argument);
 
 /* USER CODE BEGIN PFP */
 /* USER CODE END PFP */
@@ -158,6 +167,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   /* USER CODE END 2 */
 
@@ -169,6 +179,10 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* USER CODE END RTOS_SEMAPHORES */
+
+  /* Create the timer(s) */
+  /* creation of timer_trava */
+  timer_travaHandle = osTimerNew(callback_timer_trava, osTimerOnce, NULL, &timer_trava_attributes);
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* USER CODE END RTOS_TIMERS */
@@ -224,10 +238,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -249,13 +264,96 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_TIM1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART1|RCC_PERIPHCLK_RTC
+                              |RCC_PERIPHCLK_TIM1;
   PeriphClkInit.Usart1ClockSelection = RCC_USART1CLKSOURCE_PCLK1;
+  PeriphClkInit.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
   PeriphClkInit.Tim1ClockSelection = RCC_TIM1CLK_HCLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef sDate = {0};
+  RTC_AlarmTypeDef sAlarm = {0};
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+
+  /* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0x0;
+  sTime.Minutes = 0x0;
+  sTime.Seconds = 0x0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
+  sDate.Month = RTC_MONTH_JANUARY;
+  sDate.Date = 0x1;
+  sDate.Year = 0x0;
+
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Enable the Alarm A
+  */
+  sAlarm.AlarmTime.Hours = 0x23;
+  sAlarm.AlarmTime.Minutes = 0x59;
+  sAlarm.AlarmTime.Seconds = 0x59;
+  sAlarm.AlarmTime.SubSeconds = 0x0;
+  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
+  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+  sAlarm.AlarmDateWeekDay = 0x7;
+  sAlarm.Alarm = RTC_ALARM_A;
+  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+  /* USER CODE END RTC_Init 2 */
+
 }
 
 /**
@@ -288,7 +386,7 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
-  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
+  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_INVERTED;
   sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
   sClockSourceConfig.ClockFilter = 15;
   if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
@@ -329,11 +427,11 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
+  htim2.Init.Prescaler = 720;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = pwm_max;
+  htim2.Init.Period = 1000;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
   {
     Error_Handler();
@@ -357,13 +455,12 @@ static void MX_TIM2_Init(void)
   sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2);
-	TIM2->CCR1 = 0;
+
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
 
@@ -418,17 +515,27 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, GPIO_PIN_SET);
+
   /*Configure GPIO pin : BREAK_1_Pin */
   GPIO_InitStruct.Pin = BREAK_1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BREAK_1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BREAK_2_Pin */
   GPIO_InitStruct.Pin = BREAK_2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BREAK_2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : rele_ctrl_Pin */
+  GPIO_InitStruct.Pin = rele_ctrl_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(rele_ctrl_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
@@ -446,22 +553,31 @@ static void MX_GPIO_Init(void)
 
 
 
+void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc) {
+	command com;
+	com.button_id = 3;
+	com.button_status=1;
+	osMessageQueuePut(input_queueHandle, &com, 0, 0);
+
+	char* input_command = "End of the week\n";
+	osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 0);
+}
 
 
 
 
-
-/*
- * Since the available function HAL_UART_Receive reads a predetermined amount of bytes
- * this function  was developt to try to read until finds the \n char
-*/
+//This function is used to receive a string from the UART port
+//It will return 1 if the string was received successfully, or 0 if there was an error
+//The timeout parameter is used to set how long the function will wait for a character before giving up
+//The received parameter is used to store the received string
+//The huartX parameter is used to specify which UART port to use
+//this function  was developt to try to read until finds the \n char
 int FON_UART_Receive(char *received, uint16_t timeout,UART_HandleTypeDef *huartX) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
     while (1) {
         status = HAL_UART_Receive(huartX, &receivedChar, 1, timeout); //tries to read next availabe byte in the buffer
-
         if (status == HAL_OK) { //verifies if the read was succesfull
             if (receivedChar == '\n') {
             	received[index] = '\0';
@@ -519,27 +635,37 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
 	}
 }
 
+
+
+void backup_write(uint32_t reg){
+	   HAL_PWR_EnableBkUpAccess();
+	   // Writes a data in a RTC Backup data Register 1
+	   HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR0, reg);
+	   HAL_PWR_DisableBkUpAccess();
+}
+
+
 /* USER CODE END 4 */
 
-
-/* USER CODE BEGIN BT_reader_funct */
+/* USER CODE BEGIN Header_BT_reader_funct */
 /**
-* @brief Function implementing the BT_reader_funct thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END BT_reader_funct */
+  * @brief  Function implementing the bluetooth_task thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_BT_reader_funct */
 void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	unsigned char str[8] ="\r\nInit\r\n";  //initial post to confirm
+	unsigned char str[8] ="\nInit\n";  //initial post to confirm
 	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
+
+
+
 
 	char* res;
     char receivedData[32];
 	command com;
-
-
 	while (1) {
 	        if (FON_UART_Receive(receivedData,500, &huart1)){
 	        	if (strlen(receivedData)==3){ //strlen function returns the "used" len of a string, not the allocated size
@@ -553,14 +679,14 @@ void BT_reader_funct(void *argument)
 	        	if (osMessageQueueGet(bluetooth_queueHandle, &res, NULL, 250) == osOK) {
 	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
 	        	}
-	        	if (osMessageQueueGetCount(bluetooth_queueHandle)==0){
+	        	else{
 	        		break;
 	        	}
 
 	        }
 
-	        //osDelay(1000);
-	        osThreadYield();
+	        osDelay(500);
+	        //osThreadYield();
 	}
 
 
@@ -579,34 +705,86 @@ void MT_controller_funct(void *argument)
 {
   /* USER CODE BEGIN MT_controller_funct */
   /* Infinite loop */
+	HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
 
 	//variables for the finite state machine
 	int lock = 0; 		//binary indicator for the  locking
+	int onhold=0;
 	int brk = 0;  		//binary indicator for the  brake
+	int stationary = 0; //binaryh indicator the bike has fully stopped
 	float freq = 0.0; 	//float for the  frequencie sent by the sensor
 	float output = 0.0; //float for the  frequencie post MAP function
 	int freq_int; 		//int  to sent to the bluetooth the value of  freq (I had issues formating string with float)
 
 	command com;
 	char* input_command,decision;
+	uint32_t reg = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR0);
+	osTimerStart(timer_travaHandle, minute*0.5);
+
+	 if ((reg != 0) && (reg != 1) ){
+			   // Write Back Up Register 1 Data
+		 	   backup_write(0);
+			   asprintf(&input_command, "Starting value: %d\n", 0);
+			   osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
+	 }
+	 else{
+			 lock = (int) reg;
+			 asprintf(&input_command, "MEM read: %d\n", lock);
+			 osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
+
+	 }
+
 
 	while(1){
 		if (osMessageQueueGet(input_queueHandle, &com, NULL, 2000)== osOK){
-			if(com.button_id==9){
-				lock = com.button_status;
-				if (lock){input_command = "lock\n";} 	//this lines just return the action to the bluetooth
-				else{input_command = "UNlock\n";}		// might delete them in the final version
-			}
-			else if(com.button_id==1){
+			if(com.button_id==1){
 				brk = com.button_status;
 				if (brk){ input_command = "FREIOU \n";} //this lines just return the action to the bluetooth
 				else{ input_command = "SOLTOU\n";}		// might delete them in the final version
 			}
 			else if(com.button_id==2){
-					freq = (com.sensor_value)*1000;
+					freq = (com.sensor_value)*10000;
 					input_command = "";					//this lines just return the action to the bluetooth
 					freq_int = (int) freq;				// might delete them in the final version
-					asprintf(&input_command, "RPM: %d\n", freq_int);
+					asprintf(&input_command, "FREQ(Hz): %d\n", freq_int);
+
+					stationary=0;
+					osTimerStop(timer_travaHandle);
+					osTimerStart(timer_travaHandle, minute*3);
+			}
+			else if(com.button_id==9){
+				onhold = com.button_status;
+				if (onhold){
+					input_command = "lock\n";} 	//this lines just return the action to the bluetooth
+				else{
+					input_command = "UNlock\n";
+					RTC_DateTypeDef currentDate; // Create a structure to get the current date
+					HAL_RTC_GetDate(&hrtc, &currentDate, RTC_FORMAT_BIN); // Get the current date
+					currentDate.Date = (currentDate.Date + 7) % 31; // Adjust for the maximum day in a month
+
+					HAL_RTC_DeactivateAlarm(&hrtc, RTC_ALARM_A);
+					  RTC_AlarmTypeDef sAlarm = {0};
+					  sAlarm.AlarmTime.Hours = 0x23;
+					  sAlarm.AlarmTime.Minutes = 0x59;
+					  sAlarm.AlarmTime.Seconds = 0x59;
+					  sAlarm.AlarmTime.SubSeconds = 0x0;
+					  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+					  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
+					  sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
+					  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
+					  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
+					  sAlarm.AlarmDateWeekDay = currentDate.Date;
+					  sAlarm.Alarm = RTC_ALARM_A;
+					  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BCD) != HAL_OK)
+					  {
+					    Error_Handler();
+					  }
+				}
+				backup_write(lock);
+			}
+			else if(com.button_id==3){
+				stationary = com.button_status;
+				input_command = "stoped\n"; 	//this lines just return the action to the bluetooth
 			}
 			osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 2000);
 
@@ -617,7 +795,10 @@ void MT_controller_funct(void *argument)
 
 		}
 
-
+		if (stationary){
+			lock=onhold;
+			output=666;
+		}
 		if(!lock){
 			if (!brk){
 				//normal movemente
@@ -625,23 +806,25 @@ void MT_controller_funct(void *argument)
 			}
 			else{
 				//nether motor or lock
-			output = 0;
+			output = pwm_min;
 			}
+			HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, 1);
+			htim2.Instance->CCR1 = output;
 		}
 		else{
 			//call locking function
 			// it is still not defined what to do when locking the bike
 			//but the code will go here
-			output = 0;
+			HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, 0);
+			htim2.Instance->CCR1 = pwm_min;
 		}
 
-		//activate motor
-		TIM2->CCR1 = output;
 		//return status to phone
 		asprintf(&decision, "OUTPUT: %d\n", (int)output);
 		osMessageQueuePut(bluetooth_queueHandle, &decision, 0, 2000);
-        //osThreadYield();
-		osDelay(1000);
+
+		osThreadYield();
+		//osDelay(1000);
 
 	}
   /* USER CODE END MT_controller_funct */
@@ -658,14 +841,14 @@ void Sensor_reader_funct(void *argument)
 {
   /* USER CODE BEGIN Sensor_reader_funct */
   /* Infinite loop */
-	int delay = 2000;				//int to define  how often the sensors will be read
+	int delay = 500;				//int to define  how often the sensors will be read
 	float rpm_input, rpm_old = 0;	// both current and old pedal measures
 	int counter;					// value read from the periferal
 	command com;
 	com.button_id = 2;				// code of the comand to be sent
 	while(1){
         counter = __HAL_TIM_GET_COUNTER(&htim1); //getter for the nummber of pulses
-        rpm_input =(float) counter/(PulsesPerRound*delay);
+        rpm_input =(float) 1.0*counter/(PulsesPerRound*delay);
 		com.sensor_value = rpm_input;
 		if (counter != rpm_old){
 			osMessageQueuePut(input_queueHandle, &com, 0, 500);
@@ -675,10 +858,24 @@ void Sensor_reader_funct(void *argument)
 		rpm_old = counter;
 		osDelay(delay);
         //osThreadYield();
+
 	}
   /* USER CODE END Sensor_reader_funct */
 }
 
+/* callback_timer_trava function */
+void callback_timer_trava(void *argument)
+{
+  /* USER CODE BEGIN callback_timer_trava */
+	command com;
+	com.button_id = 3;
+	com.button_status=1;
+	osMessageQueuePut(input_queueHandle, &com, 0, 0);
+
+	char* input_command = "Now able to lock!!!!!!!!\n";
+	osMessageQueuePut(bluetooth_queueHandle, &input_command, 0, 0);
+  /* USER CODE END callback_timer_trava */
+}
 
 /**
   * @brief  Period elapsed callback in non blocking mode

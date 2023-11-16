@@ -12,6 +12,11 @@
                     "id":9,
                     "locking":"00",
                     "unlocking":"01"
+                },
+                "lock_timer":{
+                    "id":3,
+                    "locking":"00",
+                    "unlocking":"01"
                 }
             }
     },
@@ -28,6 +33,11 @@
             "id":1,
             "break":"00",
             "release":"01"
+        },
+	"RELE ctrl":{ //can be changed
+            "pin":  ["Pc8", "GND"],
+            "short":"01",
+            "esc":"00"
         },
         "pedal":{
             "pin":  ["PA12", "GND", "VCC"],

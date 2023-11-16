@@ -59,17 +59,20 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
-#define rpm_min 10
-#define PulsesPerRound 20
-#define rpm_max 50
-#define pwm_max 255
-#define pwm_min 0
+#define PulsesPerRound 12
+#define pedal_max 15
+#define pedal_min 3
+#define pwm_max 200
+#define pwm_min 100
+#define minute 60000
 #define BREAK_1_Pin GPIO_PIN_5
 #define BREAK_1_GPIO_Port GPIOA
 #define BREAK_1_EXTI_IRQn EXTI9_5_IRQn
 #define BREAK_2_Pin GPIO_PIN_6
 #define BREAK_2_GPIO_Port GPIOA
 #define BREAK_2_EXTI_IRQn EXTI9_5_IRQn
+#define rele_ctrl_Pin GPIO_PIN_8
+#define rele_ctrl_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
 
