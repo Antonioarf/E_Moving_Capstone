@@ -118,9 +118,9 @@ while (1){
 
 The phone side of the communication was simulated via the Serial Bluetooth Terminal app, using macros to send consistent info to the board and visualizing the returned status of the program
 
-[https://lh7-us.googleusercontent.com/qVThD_vmJHR7IT59u-HAWsdCUmyXs-sXnvTV4LM4GmEci5GS94HtJsAswmc8YVDM5WGQkxip0PE1kIOTs2f-eB1qea4HFDrgD2C7RdrBuayrPTaM1sDgnhmh0QZayB95uJ8oR0Cz0jvuH4u7iJga8ks](https://lh7-us.googleusercontent.com/qVThD_vmJHR7IT59u-HAWsdCUmyXs-sXnvTV4LM4GmEci5GS94HtJsAswmc8YVDM5WGQkxip0PE1kIOTs2f-eB1qea4HFDrgD2C7RdrBuayrPTaM1sDgnhmh0QZayB95uJ8oR0Cz0jvuH4u7iJga8ks)
+![print1.png](img/print1.png)
 
-[https://lh7-us.googleusercontent.com/CXUr3Prdl4hUzP6FR94lTbMmI1VG5ov4a0fBtM88KC6WfkOPjhbP4y9lUQT9dis4OK6bj-c3ApH3jJKCF1HsoOInWSAIQARYB4Y-lKtgef1O25JKdsVFgPG9677eahLBhGTJlTOGQIpap3hv8jzruyI](https://lh7-us.googleusercontent.com/CXUr3Prdl4hUzP6FR94lTbMmI1VG5ov4a0fBtM88KC6WfkOPjhbP4y9lUQT9dis4OK6bj-c3ApH3jJKCF1HsoOInWSAIQARYB4Y-lKtgef1O25JKdsVFgPG9677eahLBhGTJlTOGQIpap3hv8jzruyI)
+![print2.png](img/print2.png)
 
 Once the Bluetooth communication was properly implemented, and able to be used as a debugging tool, the next step was to implement the first and simplest sensor, the brakes. They were connected to the PA5 and PA6 pins configured as “External Interrupt Mode” with both rising and falling edges detection triggers with a pull-up connected, so the interruption is called on both the push and release motion of the handle.
 
@@ -155,7 +155,7 @@ The only change between the switch used for prototyping and the final button was
 
 Next was the implementation of the pedal encoder, which happened in 3 phases, the first using the KY-040 rotary encoder, as a simple attempt to read and count the pulses emitted. To do so the TIM1 timer was configured with the clock source set as ETR2, to read the pin PA12 as its clock.
 
-[https://lh7-us.googleusercontent.com/svIxrpV6UmODZyIcIsC_GEnkj0FWV3DNzj5BJavL_xxp9KJCoZMI8gzbQ8qQVGBWDiOiCvLBMAGx8uUW58a0oyOPWMTB0tVsR_xDAEJEpUUnjYgq3O75eWvg3DvSQAjKkK9eaUCzZVNDOis8c9vOfNg](https://lh7-us.googleusercontent.com/svIxrpV6UmODZyIcIsC_GEnkj0FWV3DNzj5BJavL_xxp9KJCoZMI8gzbQ8qQVGBWDiOiCvLBMAGx8uUW58a0oyOPWMTB0tVsR_xDAEJEpUUnjYgq3O75eWvg3DvSQAjKkK9eaUCzZVNDOis8c9vOfNg)
+![encoder1.png](img/encoder1.png)
 
 The TIM1 module has the pre-build function to get the number of clocks passed, as well as reset said count to 0, making it so to calculate the frequency with the encoder is rotating it is only necessary the time between reads and the number of pulses expected per round of the encoder
 
@@ -166,7 +166,7 @@ hz_input =(**float**) 1.0*counter/(PulsesPerRound*delay);
 
 The second test used an F249 optical encoder, connected to a DC motor with a gear, to simulate multiple continuous pulses, to ensure the board was able to calculate the rotational speed with consistency, before validating with the real sensor in the bike.
 
-[https://lh7-us.googleusercontent.com/mr-UcbsHx6QRFLWS_lkHvJOyR6CTdWSb8yN1vRqkDZVyVsYOIZubyuBmV9mk23AOabp4fXrWD2sxUgZo59gBDuWUQsOCtPiSd9EgiT9hUFTArJDcm2B1otRCKkXbHjcOV0XlHplhQ7NNnjOOADNYHxI](https://lh7-us.googleusercontent.com/mr-UcbsHx6QRFLWS_lkHvJOyR6CTdWSb8yN1vRqkDZVyVsYOIZubyuBmV9mk23AOabp4fXrWD2sxUgZo59gBDuWUQsOCtPiSd9EgiT9hUFTArJDcm2B1otRCKkXbHjcOV0XlHplhQ7NNnjOOADNYHxI)
+![encoder2.png](img/encoder2.png)
 
 Once all the essential sensors were implemented, the next step was to actuate the motor according to said sensors. For prototyping, while the new motor speed controller is in development, a HobbyKing™ SS Series 190-200A electronic speed controller was used, with its input connected to TIM2 channel 1, configured as PWM Generation, on the pin PA0. The timer parameters were set as Prescaler value of 720 and Counter Period equal to 1000, so that the value written to the peripheral corresponds to the duty cycle in milliseconds.
 
