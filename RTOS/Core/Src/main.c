@@ -280,7 +280,6 @@ void SystemClock_Config(void)
   * @param None
   * @retval None
   */
-
 static void MX_RTC_Init(void)
 {
 
@@ -517,17 +516,17 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(rele_ctrl_GPIO_Port, rele_ctrl_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : BREAK_1_Pin */
   GPIO_InitStruct.Pin = BREAK_1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BREAK_1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BREAK_2_Pin */
   GPIO_InitStruct.Pin = BREAK_2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BREAK_2_GPIO_Port, &GPIO_InitStruct);
 
@@ -566,17 +565,19 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc) {
 
 
 
-/*
- * Since the available function HAL_UART_Receive reads a predetermined amount of bytes
- * this function  was developt to try to read until finds the \n char
-*/
+
+//This function is used to receive a string from the UART port
+//It will return 1 if the string was received successfully, or 0 if there was an error
+//The timeout parameter is used to set how long the function will wait for a character before giving up
+//The received parameter is used to store the received string
+//The huartX parameter is used to specify which UART port to use
+//this function  was developt to try to read until finds the \n char
 int FON_UART_Receive(char *received, uint16_t timeout,UART_HandleTypeDef *huartX) {
     HAL_StatusTypeDef status;
     unsigned char receivedChar;
     int index = 0;
     while (1) {
         status = HAL_UART_Receive(huartX, &receivedChar, 1, timeout); //tries to read next availabe byte in the buffer
-
         if (status == HAL_OK) { //verifies if the read was succesfull
             if (receivedChar == '\n') {
             	received[index] = '\0';
@@ -656,7 +657,7 @@ void backup_write(uint32_t reg){
 void BT_reader_funct(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	unsigned char str[8] ="\r\nInit\r\n";  //initial post to confirm
+	unsigned char str[8] ="\nInit\n";  //initial post to confirm
 	HAL_UART_Transmit(&huart1, str, sizeof(str), 500);
 
 
@@ -678,7 +679,7 @@ void BT_reader_funct(void *argument)
 	        	if (osMessageQueueGet(bluetooth_queueHandle, &res, NULL, 250) == osOK) {
 	        	    HAL_UART_Transmit(&huart1, res, strlen(res), 1000);
 	        	}
-	        	if (osMessageQueueGetCount(bluetooth_queueHandle)==0){
+	        	else{
 	        		break;
 	        	}
 
@@ -749,7 +750,7 @@ void MT_controller_funct(void *argument)
 
 					stationary=0;
 					osTimerStop(timer_travaHandle);
-					osTimerStart(timer_travaHandle, minute*0.5);
+					osTimerStart(timer_travaHandle, minute*3);
 			}
 			else if(com.button_id==9){
 				onhold = com.button_status;
